@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:albumseek/src/data/photo_library.dart';
 import 'package:albumseek/src/model/album_summary.dart';
 import 'package:albumseek/src/model/photo_record.dart';
@@ -81,6 +83,11 @@ class FakePhotoLibrary implements PhotoLibrary {
       throw PhotoLibraryException('storage unavailable');
     }
     return albums;
+  }
+
+  @override
+  Future<Uint8List?> imageBytes(PhotoRecord photo, {int maxSide = 1600}) async {
+    return null;
   }
 
   @override

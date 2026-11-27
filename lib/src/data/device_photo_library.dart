@@ -170,6 +170,23 @@ class DevicePhotoLibrary implements PhotoLibrary {
   }
 
   @override
+  Future<Uint8List?> imageBytes(PhotoRecord photo, {int maxSide = 1600}) async {
+    final asset = _assets[photo.id];
+    if (asset != null) {
+      final side = maxSide.clamp(64, 4096);
+      return asset.thumbnailDataWithSize(
+        ThumbnailSize(side, side),
+        quality: 90,
+      );
+    }
+    final path = _files[photo.id];
+    if (path == null) {
+      return null;
+    }
+    return File(path).readAsBytes();
+  }
+
+  @override
   Future<List<PhotoRecord>> pickImages() async {
     try {
       final files = await _picker.pickMultiImage(requestFullMetadata: false);

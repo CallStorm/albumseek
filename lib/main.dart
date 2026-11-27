@@ -2,8 +2,11 @@ import 'package:flutter/widgets.dart';
 
 import 'src/albumseek_app.dart';
 import 'src/data/device_photo_library.dart';
+import 'src/runtime/album_index.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(AlbumseekApp(library: DevicePhotoLibrary()));
+  final library = DevicePhotoLibrary();
+  final index = await AlbumIndex.open(library);
+  runApp(AlbumseekApp(library: library, index: index));
 }

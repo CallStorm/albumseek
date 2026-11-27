@@ -1,33 +1,39 @@
-/// Runtimes the Android project is structured to host later.
-///
-/// None of these are linked in this build. See [InferenceBackend] and
-/// [LocalIndex].
+/// Runtimes this build actually links, plus the face stack left for later.
 class EnginePlan {
-  const EnginePlan({required this.runtime, required this.role});
+  const EnginePlan({
+    required this.runtime,
+    required this.role,
+    required this.linked,
+  });
 
   final String runtime;
   final String role;
+  final bool linked;
 }
 
 const List<EnginePlan> plannedEngines = <EnginePlan>[
   EnginePlan(
     runtime: 'ONNX Runtime',
-    role: 'Portable model inference',
+    role: 'PP-OCRv6 medium OCR on CPU',
+    linked: true,
   ),
   EnginePlan(
-    runtime: 'MNN',
-    role: 'Mobile inference, including OCR',
+    runtime: 'LiteRT',
+    role: 'EmbeddingGemma 2 text and vision embeddings',
+    linked: true,
   ),
   EnginePlan(
     runtime: 'llama.cpp',
-    role: 'Local text models',
+    role: 'Qwen3-VL-2B-Instruct labels, unloaded after each photo',
+    linked: true,
   ),
   EnginePlan(
-    runtime: 'MediaPipe / LiteRT',
-    role: 'On-device vision tasks',
+    runtime: 'MediaPipe or YuNet + AdaFace',
+    role: 'Face clustering, not linked yet',
+    linked: false,
   ),
 ];
 
-/// Storage planned for keyword and vector search.
+/// Storage for keyword and vector search.
 const String plannedIndex =
-    'sqlite-vec for vectors and SQLite FTS5 with Chinese tokenization';
+    'sqlite-vec for 768-d vectors and SQLite FTS5 with CJK bigrams';

@@ -1,15 +1,20 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../model/library_query.dart';
+import '../model/photo_record.dart';
+import '../runtime/album_index.dart';
 import '../state/library_controller.dart';
 import 'access_gate.dart';
 import 'format.dart';
 import 'photo_grid.dart';
 
 class SearchPage extends StatelessWidget {
-  const SearchPage({required this.controller, super.key});
+  const SearchPage({required this.controller, this.index, super.key});
 
   final LibraryController controller;
+  final AlbumIndex? index;
 
   @override
   Widget build(BuildContext context) {
@@ -17,16 +22,18 @@ class SearchPage extends StatelessWidget {
       appBar: AppBar(title: const Text('Search')),
       body: AccessGate(
         controller: controller,
-        ready: (context) => _SearchBody(controller: controller),
+        ready: (context) =>
+            _SearchBody(controller: controller, index: index),
       ),
     );
   }
 }
 
 class _SearchBody extends StatefulWidget {
-  const _SearchBody({required this.controller});
+  const _SearchBody({required this.controller, this.index});
 
   final LibraryController controller;
+  final AlbumIndex? index;
 
   @override
   State<_SearchBody> createState() => _SearchBodyState();
@@ -35,11 +42,32 @@ class _SearchBody extends StatefulWidget {
 class _SearchBodyState extends State<_SearchBody> {
   final TextEditingController _text = TextEditingController();
   DateScope _scope = DateScope.any;
+  Timer? _debounce;
+  List<SearchHit> _hits = const [];
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _text.dispose();
     super.dispose();
+  }
+
+  void _queryChanged() {
+    setState(() {});
+    _debounce?.cancel();
+    final index = widget.index;
+    final text = _text.text.trim();
+    if (index == null || text.isEmpty) {
+      _hits = const [];
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 250), () async {
+      final hits = await index.search(text);
+      if (!mounted || _text.text.trim() != text) {
+        return;
+      }
+      setState(() => _hits = hits);
+    });
   }
 
   @override
@@ -49,7 +77,9 @@ class _SearchBodyState extends State<_SearchBody> {
       listenable: controller,
       builder: (context, _) {
         final query = LibraryQuery(filename: _text.text, dateScope: _scope);
-        final results = controller.apply(query);
+        final filenameResults = controller.apply(query);
+        final indexed = _indexedResults(controller.photos, filenameResults);
+        final results = indexed ?? filenameResults;
         final theme = Theme.of(context);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -59,13 +89,15 @@ class _SearchBodyState extends State<_SearchBody> {
               child: TextField(
                 controller: _text,
                 textInputAction: TextInputAction.search,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   hintText: 'File name',
                   prefixIcon: Icon(Icons.search),
                   border: OutlineInputBorder(),
-                  helperText: 'Matches file names and dates on this phone.',
+                  helperText: widget.index == null
+                      ? 'Matches file names and dates on this phone.'
+                      : 'Matches file names, dates, text in photos, and descriptions.',
                 ),
-                onChanged: (_) => setState(() {}),
+                onChanged: (_) => _queryChanged(),
               ),
             ),
             SizedBox(
@@ -100,6 +132,9 @@ class _SearchBodyState extends State<_SearchBody> {
                   : PhotoGrid(
                       photos: results,
                       library: controller.library,
+                      index: widget.index,
+                      labelOf: widget.index?.labelFor,
+                      lookup: (id) => _find(controller.photos, id),
                     ),
             ),
           ],
@@ -107,6 +142,46 @@ class _SearchBodyState extends State<_SearchBody> {
       },
     );
   }
+
+  List<PhotoRecord>? _indexedResults(
+    List<PhotoRecord> photos,
+    List<PhotoRecord> filenameResults,
+  ) {
+    final index = widget.index;
+    if (index == null ||
+        _text.text.trim().isEmpty ||
+        !index.hasIndexedPhotos) {
+      return null;
+    }
+    final byId = {for (final photo in photos) photo.id: photo};
+    final matched = <PhotoRecord>[];
+    for (final hit in _hits) {
+      final photo = byId[hit.photoId];
+      if (photo == null || !_inScope(photo)) {
+        continue;
+      }
+      matched.add(photo);
+    }
+    if (matched.isEmpty) {
+      return filenameResults;
+    }
+    return matched;
+  }
+
+  bool _inScope(PhotoRecord photo) {
+    return LibraryQuery(
+      dateScope: _scope,
+    ).apply([photo], DateTime.now()).isNotEmpty;
+  }
+}
+
+PhotoRecord? _find(List<PhotoRecord> photos, String id) {
+  for (final photo in photos) {
+    if (photo.id == id) {
+      return photo;
+    }
+  }
+  return null;
 }
 
 String _scopeLabel(DateScope scope) {

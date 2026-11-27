@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/widgets.dart';
 
 import '../model/album_summary.dart';
@@ -72,6 +74,9 @@ abstract class PhotoLibrary {
 
   /// System picker fallback. An empty list means the user cancelled.
   Future<List<PhotoRecord>> pickImages();
+
+  /// JPEG or PNG bytes for indexing. Null when the photo cannot be read.
+  Future<Uint8List?> imageBytes(PhotoRecord photo, {int maxSide = 1600});
 
   Widget thumbnailOf(PhotoRecord photo);
 

@@ -19,7 +19,8 @@ android {
         applicationId = "app.albumseek"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // LiteRT (EmbeddingGemma 2) requires API 30. Huawei nova 15 Ultra is newer.
+        minSdk = 30
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
@@ -29,11 +30,22 @@ android {
         versionName = flutter.versionName
     }
 
+    packaging {
+        // llama.cpp's Vulkan backend is optional. Albumseek asks for CPU so a
+        // Kirin phone without a usable Vulkan driver still labels photos.
+        jniLibs {
+            excludes += setOf("**/libggml-vulkan.so")
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // Debug keystore so the APK can be sideloaded before a release key exists.
             signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

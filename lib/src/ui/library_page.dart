@@ -1,14 +1,18 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../model/photo_record.dart';
+import '../runtime/album_index.dart';
 import '../state/library_controller.dart';
 import 'access_gate.dart';
 import 'format.dart';
+import 'models_page.dart';
 import 'photo_grid.dart';
 
 class LibraryPage extends StatelessWidget {
-  const LibraryPage({required this.controller, super.key});
+  const LibraryPage({required this.controller, this.index, super.key});
 
   final LibraryController controller;
+  final AlbumIndex? index;
 
   @override
   Widget build(BuildContext context) {
@@ -43,16 +47,17 @@ class LibraryPage extends StatelessWidget {
       ),
       body: AccessGate(
         controller: controller,
-        ready: (context) => _LibraryBody(controller: controller),
+        ready: (context) => _LibraryBody(controller: controller, index: index),
       ),
     );
   }
 }
 
 class _LibraryBody extends StatelessWidget {
-  const _LibraryBody({required this.controller});
+  const _LibraryBody({required this.controller, this.index});
 
   final LibraryController controller;
+  final AlbumIndex? index;
 
   @override
   Widget build(BuildContext context) {
@@ -63,6 +68,7 @@ class _LibraryBody extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (index != null) _IndexBanner(index: index!, controller: controller),
         if (controller.errorMessage != null)
           Material(
             color: theme.colorScheme.errorContainer,
@@ -114,11 +120,91 @@ class _LibraryBody extends StatelessWidget {
                   photos: controller.photos,
                   library: controller.library,
                   onRefresh: controller.refresh,
+                  index: index,
+                  labelOf: index?.labelFor,
+                  lookup: (id) => _findPhoto(controller.photos, id),
                 ),
         ),
       ],
     );
   }
+}
+
+class _IndexBanner extends StatelessWidget {
+  const _IndexBanner({required this.index, required this.controller});
+
+  final AlbumIndex index;
+  final LibraryController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: index,
+      builder: (context, _) {
+        final stage = switch (index.stage) {
+          IndexStage.readingText => 'reading text',
+          IndexStage.embedding => 'embedding',
+          IndexStage.naming => 'naming',
+          IndexStage.idle => 'idle',
+        };
+        final ready = index.searchModelsReady;
+        return Material(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  ready
+                      ? (index.running
+                            ? 'Indexing ${index.done} / ${index.total} · $stage'
+                            : 'Indexed ${index.done} / ${index.total}')
+                      : 'Download on-device models to search text and pictures.',
+                ),
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (context) => ModelsPage(index: index),
+                          ),
+                        );
+                      },
+                      child: const Text('Models'),
+                    ),
+                    if (ready && index.running && !index.paused)
+                      TextButton(
+                        onPressed: index.pause,
+                        child: const Text('Pause'),
+                      ),
+                    if (ready && (!index.running || index.paused))
+                      TextButton(
+                        onPressed: () {
+                          index.noteLibrary(controller.photos);
+                          index.start();
+                        },
+                        child: const Text('Index'),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+PhotoRecord? _findPhoto(List<PhotoRecord> photos, String id) {
+  for (final photo in photos) {
+    if (photo.id == id) {
+      return photo;
+    }
+  }
+  return null;
 }
 
 class _EmptyLibrary extends StatelessWidget {

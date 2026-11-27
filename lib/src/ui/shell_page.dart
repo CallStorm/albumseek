@@ -1,14 +1,16 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../runtime/album_index.dart';
 import '../state/library_controller.dart';
 import 'collections_page.dart';
 import 'library_page.dart';
 import 'search_page.dart';
 
 class ShellPage extends StatefulWidget {
-  const ShellPage({required this.controller, super.key});
+  const ShellPage({required this.controller, this.index, super.key});
 
   final LibraryController controller;
+  final AlbumIndex? index;
 
   @override
   State<ShellPage> createState() => _ShellPageState();
@@ -23,8 +25,8 @@ class _ShellPageState extends State<ShellPage> {
       body: IndexedStack(
         index: _index,
         children: [
-          LibraryPage(controller: widget.controller),
-          SearchPage(controller: widget.controller),
+          LibraryPage(controller: widget.controller, index: widget.index),
+          SearchPage(controller: widget.controller, index: widget.index),
           CollectionsPage(controller: widget.controller),
         ],
       ),
