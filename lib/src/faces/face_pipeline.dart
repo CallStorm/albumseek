@@ -38,8 +38,8 @@ class LocatedFace {
   }
 }
 
-/// YuNet detection and AdaFace embeddings. Each session is opened and closed
-/// by the caller so both are not resident together.
+/// YuNet detection and AdaFace embeddings. The indexer keeps both sessions
+/// open for the whole faces pass, then closes them.
 class FacePipeline {
   FacePipeline({OnnxRuntimeBackend? detector, OnnxRuntimeBackend? embedder})
     : _detector = detector ?? OnnxRuntimeBackend(),
@@ -48,11 +48,21 @@ class FacePipeline {
   final OnnxRuntimeBackend _detector;
   final OnnxRuntimeBackend _embedder;
 
-  Future<void> openDetector(String path) => _detector.loadModel(path);
+  Future<void> openDetector(String path) {
+    if (_detector.isOpen) {
+      return Future<void>.value();
+    }
+    return _detector.loadModel(path);
+  }
 
   Future<void> closeDetector() => _detector.close();
 
-  Future<void> openEmbedder(String path) => _embedder.loadModel(path);
+  Future<void> openEmbedder(String path) {
+    if (_embedder.isOpen) {
+      return Future<void>.value();
+    }
+    return _embedder.loadModel(path);
+  }
 
   Future<void> closeEmbedder() => _embedder.close();
 

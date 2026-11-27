@@ -49,6 +49,24 @@ ParsedDocument? parseChineseDocument(String raw) {
   return null;
 }
 
+/// Whether PaddleOCR-VL should read this OCR text.
+///
+/// A parsed ID card, household register, or labeled form qualifies, as do
+/// the document titles themselves. A single 证, 户, or 表 does not.
+bool needsDocumentVision(String raw) {
+  if (parseChineseDocument(raw) != null) {
+    return true;
+  }
+  final flat = raw.replaceAll(RegExp(r'\s+'), '');
+  const phrases = ['公民身份号码', '身份证', '居民户口簿', '户口簿', '户口本'];
+  for (final phrase in phrases) {
+    if (flat.contains(phrase)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 ParsedDocument? _idCard(String text, String flat) {
   final id =
       _first(r'(?:公民身份号码|身份证号|身份号码)?[:：]?\s*(\d{17}[\dXx])', text) ??

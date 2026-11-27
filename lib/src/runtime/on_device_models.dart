@@ -49,13 +49,26 @@ class GemmaEmbedder {
   }
 }
 
-/// Qwen3-VL-2B-Instruct. The caller loads it for one label and then closes it.
+/// One llama.cpp vision model, kept open for a whole indexing pass.
 class QwenVlNamer {
-  Future<void> install(String ggufPath) {
-    return FlutterEdgeAi.installModel(
+  InferenceModel? _model;
+
+  bool get isOpen => _model != null && !_model!.isClosed;
+
+  /// Installs [ggufPath] only when this namer is not already holding a model.
+  Future<void> open(String ggufPath) async {
+    if (isOpen) {
+      return;
+    }
+    await FlutterEdgeAi.installModel(
       modelType: ModelType.general,
       fileType: ModelFileType.gguf,
     ).fromFile(ggufPath).install();
+    _model = await FlutterEdgeAi.getActiveModel(
+      maxTokens: 2048,
+      supportImage: true,
+      preferredBackend: PreferredBackend.cpu,
+    );
   }
 
   Future<String> label(Uint8List png) {
@@ -66,34 +79,37 @@ class QwenVlNamer {
     ).then(cleanLabel);
   }
 
-  /// One image question. The model is closed before this method returns.
+  /// One image question. The model stays loaded; only the chat is closed.
   Future<String> ask(
     Uint8List png, {
     required String prompt,
     int maxOutputTokens = 512,
   }) async {
-    final model = await FlutterEdgeAi.getActiveModel(
-      maxTokens: 2048,
-      supportImage: true,
-      preferredBackend: PreferredBackend.cpu,
-    );
+    final model = _model;
+    if (model == null || model.isClosed) {
+      throw StateError('Vision model is not loaded.');
+    }
+    final chat = await model.openChat(maxOutputTokens: maxOutputTokens);
     try {
-      final chat = await model.openChat(maxOutputTokens: maxOutputTokens);
-      try {
-        await chat.addQuery(
-          Message.withImage(text: prompt, isUser: true, imageBytes: png),
-        );
-        final buffer = StringBuffer();
-        await for (final response in chat.generateChatResponseAsync()) {
-          if (response is TextResponse) {
-            buffer.write(response.token);
-          }
+      await chat.addQuery(
+        Message.withImage(text: prompt, isUser: true, imageBytes: png),
+      );
+      final buffer = StringBuffer();
+      await for (final response in chat.generateChatResponseAsync()) {
+        if (response is TextResponse) {
+          buffer.write(response.token);
         }
-        return buffer.toString().trim();
-      } finally {
-        await chat.close();
       }
+      return buffer.toString().trim();
     } finally {
+      await chat.close();
+    }
+  }
+
+  Future<void> close() async {
+    final model = _model;
+    _model = null;
+    if (model != null && !model.isClosed) {
       await model.close();
     }
   }

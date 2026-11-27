@@ -139,14 +139,6 @@ class _IndexBanner extends StatelessWidget {
     return ListenableBuilder(
       listenable: index,
       builder: (context, _) {
-        final stage = switch (index.stage) {
-          IndexStage.readingText => 'reading text',
-          IndexStage.embedding => 'embedding',
-          IndexStage.faces => 'finding faces',
-          IndexStage.documents => 'reading documents',
-          IndexStage.naming => 'naming',
-          IndexStage.idle => 'idle',
-        };
         final ready = index.searchModelsReady;
         return Material(
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -155,14 +147,8 @@ class _IndexBanner extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  ready
-                      ? (index.running
-                            ? 'Indexing ${index.done} / ${index.total} · $stage'
-                            : 'Indexed ${index.done} / ${index.total}')
-                      : 'Download on-device models to search text and pictures.',
-                ),
-                Row(
+                Text(index.statusText),
+                Wrap(
                   children: [
                     TextButton(
                       onPressed: () {
@@ -186,6 +172,16 @@ class _IndexBanner extends StatelessWidget {
                           index.start();
                         },
                         child: const Text('Index'),
+                      ),
+                    if (index.namingModelsReady && index.namingEnabled)
+                      TextButton(
+                        onPressed: index.skipNaming,
+                        child: const Text('Skip naming'),
+                      ),
+                    if (index.namingModelsReady && !index.namingEnabled)
+                      TextButton(
+                        onPressed: index.enableNaming,
+                        child: const Text('Name photos'),
                       ),
                   ],
                 ),

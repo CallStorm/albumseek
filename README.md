@@ -8,13 +8,13 @@ On-device photo search for a person's camera roll. OCR, embeddings, and short la
 - Shows a scrollable grid of those images while indexing runs in the foreground.
 - If library access is denied, or the media library cannot be listed, offers the system photo picker instead.
 - Indexes with PP-OCRv6 medium (Simplified Chinese and English) and EmbeddingGemma 2 (text 270M + vision 170M, 768-d). Search fuses keyword hits and visual hits with reciprocal rank fusion.
-- Names photos with Qwen3-VL-2B-Instruct when those files are present. The model is loaded for a label and closed afterward. It is not used while searching.
-- Groups faces with OpenCV YuNet and AdaFace after those two files are downloaded. People, including group photos, are listed under Collections. Embeddings already stored are reused on the next index.
-- Reads mainland ID cards (身份证), household registers (户口本), and similar labeled forms. PP-OCRv6 text is parsed into fields. When PaddleOCR-VL-1.6 is downloaded, document-like photos get a second structured pass, then that model is closed.
+- Names photos with Qwen3-VL-2B-Instruct when those files are present. The model is loaded once for the naming pass and closed when the pass ends, you pause, or the app is backgrounded. **Skip naming** on the library banner turns that pass off. Naming is not used while searching.
+- Groups faces with OpenCV YuNet and AdaFace after those two files are downloaded. Both stay loaded for the faces pass, then unload. People, including group photos, are listed under Collections. Embeddings already stored are reused on the next index.
+- Reads mainland ID cards (身份证), household registers (户口本), and similar labeled forms from the PP-OCRv6 text. PaddleOCR-VL-1.6 runs only when that text already parses as one of those documents, or contains 公民身份号码, 身份证, 居民户口簿, 户口簿, or 户口本. A stray 证, 户, or 表 does not load it. When it does run, it is loaded once for those photos and then closed.
 - Filters by file name and date even before any model is installed. Document fields are added to the same keyword index.
 - Lists albums the phone already has.
 
-Indexing pauses when the app is backgrounded and continues when you return, so Android is less likely to kill a long run silently. On a Kirin 9010S, vision labeling can take tens of seconds per photo. The grid stays usable.
+The library banner shows the active pass and that pass's own count, for example `Indexing · reading text 12 / 340`. After OCR and embeddings finish, it says search can be used while faces, documents, and naming continue. Indexing pauses when the app is backgrounded and unloads the model it was holding. On a Kirin 9010S, naming can still take a long time even with Qwen kept loaded; skip it if you only want search.
 
 ## Huawei and other Android phones without Google Play
 
@@ -112,7 +112,9 @@ OCR, YuNet, and AdaFace run on ONNX Runtime's CPU provider. Embeddings run on Li
 
 InsightFace buffalo and antelope packs are not used. Their default license is non-commercial. YuNet is the OpenCV face detector (MIT). AdaFace weights are the official IR-18 WebFace4M export (MIT).
 
-PaddleOCR-VL stays in this build. The official GGUF repository publishes the unquantized decoder and projector, which are too large to keep resident on a 12 GB phone. The Q4_K_M decoder (300,218,624 bytes) plus F16 projector (880,415,392 bytes) above is the same Apache-2.0 model, quantized. The llama.cpp build linked by this app (llamadart 0.20.8) includes the `paddleocr` architecture. It is loaded only for photos whose PP-OCRv6 text already looks like an ID card, household register, or form, then closed. If that GGUF fails to load on a given phone, the PP-OCRv6 parse still stores 身份证, 户口本, and form fields. The feature is not dropped.
+PaddleOCR-VL stays in this build. The official GGUF repository publishes the unquantized decoder and projector, which are too large to keep resident on a 12 GB phone. The Q4_K_M decoder (300,218,624 bytes) plus F16 projector (880,415,392 bytes) above is the same Apache-2.0 model, quantized. The llama.cpp build linked by this app (llamadart 0.20.8) includes the `paddleocr` architecture. It is loaded once, only for photos whose PP-OCRv6 text parses as an ID card, household register, or labeled form, or that contain 公民身份号码, 身份证, 居民户口簿, 户口簿, or 户口本. It is not loaded for an ordinary caption that merely contains 证, 户, or 表. If that GGUF fails to load, the PP-OCRv6 parse still stores the fields. The feature is not dropped.
+
+PP-OCRv6 stays loaded for the whole text pass, then EmbeddingGemma 2 stays loaded for the whole embedding pass. YuNet and AdaFace stay loaded together for the faces pass. Qwen3-VL stays loaded for the naming pass. Each of those is closed before the next pass. Search does not keep Qwen or PaddleOCR-VL in memory.
 
 Without these files, the grid, file-name filter, date filter, and albums still work. **Index** starts once the OCR and EmbeddingGemma files are on the phone. Faces start once YuNet and AdaFace are both present. Document fields from OCR start with the search models; the PaddleOCR-VL pass starts once both of its files are present. Labels wait until both Qwen files are present. Open **Models**, download or import the files you want, then return to the library and let indexing continue. People and documents appear under **Collections**. A person's page includes group photos. Opening a document photo shows the extracted fields, and those fields match keyword search.
 

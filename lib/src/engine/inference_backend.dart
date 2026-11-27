@@ -16,10 +16,12 @@ abstract interface class InferenceBackend {
 /// One ONNX Runtime session. CPU only, so a phone without NNAPI or a GPU
 /// delegate still runs.
 class OnnxRuntimeBackend implements InferenceBackend {
-  OnnxRuntimeBackend({OnnxRuntime? runtime}) : _runtime = runtime ?? OnnxRuntime();
+  OnnxRuntimeBackend({OnnxRuntime? runtime})
+    : _runtime = runtime ?? OnnxRuntime();
 
   final OnnxRuntime _runtime;
   OrtSession? _session;
+  String? _loadedPath;
 
   @override
   String get runtimeName => 'ONNX Runtime';
@@ -30,6 +32,9 @@ class OnnxRuntimeBackend implements InferenceBackend {
 
   @override
   Future<void> loadModel(String modelPath) async {
+    if (_session != null && _loadedPath == modelPath) {
+      return;
+    }
     await _session?.close();
     _session = await _runtime.createSession(
       modelPath,
@@ -38,6 +43,7 @@ class OnnxRuntimeBackend implements InferenceBackend {
         providers: const [OrtProvider.CPU],
       ),
     );
+    _loadedPath = modelPath;
   }
 
   Future<Map<String, OrtValue>> run(Map<String, OrtValue> inputs) {
@@ -52,5 +58,6 @@ class OnnxRuntimeBackend implements InferenceBackend {
   Future<void> close() async {
     await _session?.close();
     _session = null;
+    _loadedPath = null;
   }
 }
