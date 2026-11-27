@@ -9,8 +9,10 @@ On-device photo search for a person's camera roll. OCR, embeddings, and short la
 - If library access is denied, or the media library cannot be listed, offers the system photo picker instead.
 - Indexes with PP-OCRv6 medium (Simplified Chinese and English) and EmbeddingGemma 2 (text 270M + vision 170M, 768-d). Search fuses keyword hits and visual hits with reciprocal rank fusion.
 - Names photos with Qwen3-VL-2B-Instruct when those files are present. The model is loaded for a label and closed afterward. It is not used while searching.
-- Filters by file name and date even before any model is installed.
-- Lists albums the phone already has. Face clustering is not linked yet.
+- Groups faces with OpenCV YuNet and AdaFace after those two files are downloaded. People, including group photos, are listed under Collections. Embeddings already stored are reused on the next index.
+- Reads mainland ID cards (身份证), household registers (户口本), and similar labeled forms. PP-OCRv6 text is parsed into fields. When PaddleOCR-VL-1.6 is downloaded, document-like photos get a second structured pass, then that model is closed.
+- Filters by file name and date even before any model is installed. Document fields are added to the same keyword index.
+- Lists albums the phone already has.
 
 Indexing pauses when the app is backgrounded and continues when you return, so Android is less likely to kill a long run silently. On a Kirin 9010S, vision labeling can take tens of seconds per photo. The grid stays usable.
 
@@ -31,7 +33,7 @@ Permissions:
 | `READ_MEDIA_IMAGES` | Android 13 and newer, to list images |
 | `READ_MEDIA_VISUAL_USER_SELECTED` | Android 14 and newer, when the user grants only selected photos |
 | `READ_EXTERNAL_STORAGE` (max SDK 32) | Android 12 and older |
-| `INTERNET` | Downloading model files only. Search, OCR, and labeling do not call a server |
+| `INTERNET` | Downloading model files only. Search, OCR, faces, documents, and labeling do not call a server |
 
 Debug and profile builds also use `INTERNET` so the Flutter tool can attach.
 
@@ -99,14 +101,20 @@ Weights are not inside the APK. After install, open **Models** on the library sc
 | `PP-OCRv6_rec_medium.onnx` | Recognition, Simplified Chinese and English | Apache-2.0 | [RapidAI/RapidOCR v3.9.2](https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv6/rec/PP-OCRv6_rec_medium.onnx) |
 | `ppocrv6_dict.txt` | 18708-character dictionary | Apache-2.0 | [RapidAI/RapidOCR v3.9.2](https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv6/rec/PP-OCRv6_rec_medium/ppocrv6_dict.txt) |
 | `embeddinggemma-2-text-vision-440m.litertlm` | EmbeddingGemma 2, text 270M + vision 170M, 768-d | Apache-2.0 | [litert-community export of google/embeddinggemma-2](https://huggingface.co/litert-community/embeddinggemma-2-text-vision-440m-litert-lm/blob/e301f74d5551b0c2641bd5cb4652a76239d5c5f8/embeddinggemma-2-text-vision-440m.litertlm) |
+| `face_detection_yunet_2023mar.onnx` | Face detection, about 233 KB | MIT | [opencv/face_detection_yunet](https://huggingface.co/opencv/face_detection_yunet) and [opencv_zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) |
+| `adaface_ir_18.onnx` | AdaFace IR-18, WebFace4M, 512-d, 96,105,345 bytes | MIT | [yakhyo/adaface-onnx](https://github.com/yakhyo/adaface-onnx/releases/download/weights/adaface_ir_18.onnx), export of [mk-minchul/AdaFace](https://github.com/mk-minchul/AdaFace) (MIT). Mirror: [yakhyo/uniface-weights](https://huggingface.co/yakhyo/uniface-weights) |
+| `paddleocr-vl-1-6-Q4_K_M.gguf` | PaddleOCR-VL-1.6 0.9B decoder, Q4_K_M, about 300 MB | Apache-2.0 | [moonbox-dev/PaddleOCR-VL-1.6-GGUF](https://huggingface.co/moonbox-dev/PaddleOCR-VL-1.6-GGUF). Base model: [PaddlePaddle/PaddleOCR-VL-1.6](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6) (Apache-2.0) |
+| `mmproj-paddleocr-vl-1-6-F16.gguf` | PaddleOCR-VL-1.6 vision encoder, F16, about 880 MB | Apache-2.0 | same moonbox-dev repository |
 | `Qwen3VL-2B-Instruct-Q4_K_M.gguf` | Short Chinese labels | Apache-2.0 | [Qwen/Qwen3-VL-2B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF) |
 | `mmproj-Qwen3VL-2B-Instruct-F16.gguf` | Vision projector for that GGUF | Apache-2.0 | same Qwen repository |
 
-OCR runs on ONNX Runtime's CPU provider. Embeddings run on LiteRT's CPU path. Labels run on llama.cpp's CPU backend, and that model is closed after each photo. The Vulkan ggml library is not packaged. Keyword text is stored in SQLite FTS5 as CJK bigrams. Vectors are 768-d in sqlite-vec 0.1.9 (MIT or Apache-2.0). The Android `libsqlite_vec.so` builds from that release are in `android/app/src/main/jniLibs`, because the current pub.dev plugin does not include its C source. Keyword and visual hits are fused with reciprocal rank fusion. There is no cloud reranker and no Qwen3-Embedding-8B.
+OCR, YuNet, and AdaFace run on ONNX Runtime's CPU provider. Embeddings run on LiteRT's CPU path. Labels and document vision run on llama.cpp's CPU backend. Only one of those large models is loaded at a time, and it is closed before the next stage. The Vulkan ggml library is not packaged. Keyword text, including document fields, is stored in SQLite FTS5 as CJK bigrams. Photo vectors are 768-d in sqlite-vec 0.1.9 (MIT or Apache-2.0). Face vectors are 512-d JSON next to the photo id. The Android `libsqlite_vec.so` builds from that release are in `android/app/src/main/jniLibs`, because the current pub.dev plugin does not include its C source. Keyword and visual hits are fused with reciprocal rank fusion. There is no cloud reranker and no Qwen3-Embedding-8B.
 
-Face grouping is declared in `lib/src/engine/face_index.dart` and is not implemented. The intended stack is MediaPipe or OpenCV YuNet plus AdaFace (MIT). InsightFace buffalo and antelope packs are not used.
+InsightFace buffalo and antelope packs are not used. Their default license is non-commercial. YuNet is the OpenCV face detector (MIT). AdaFace weights are the official IR-18 WebFace4M export (MIT).
 
-Without these files, the grid, file-name filter, date filter, and albums still work. **Index** starts once the OCR and EmbeddingGemma files are on the phone. Labels wait until both Qwen files are present.
+PaddleOCR-VL stays in this build. The official GGUF repository publishes the unquantized decoder and projector, which are too large to keep resident on a 12 GB phone. The Q4_K_M decoder (300,218,624 bytes) plus F16 projector (880,415,392 bytes) above is the same Apache-2.0 model, quantized. The llama.cpp build linked by this app (llamadart 0.20.8) includes the `paddleocr` architecture. It is loaded only for photos whose PP-OCRv6 text already looks like an ID card, household register, or form, then closed. If that GGUF fails to load on a given phone, the PP-OCRv6 parse still stores 身份证, 户口本, and form fields. The feature is not dropped.
+
+Without these files, the grid, file-name filter, date filter, and albums still work. **Index** starts once the OCR and EmbeddingGemma files are on the phone. Faces start once YuNet and AdaFace are both present. Document fields from OCR start with the search models; the PaddleOCR-VL pass starts once both of its files are present. Labels wait until both Qwen files are present. Open **Models**, download or import the files you want, then return to the library and let indexing continue. People and documents appear under **Collections**. A person's page includes group photos. Opening a document photo shows the extracted fields, and those fields match keyword search.
 
 ## iOS
 

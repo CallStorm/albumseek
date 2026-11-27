@@ -25,10 +25,7 @@ void main() {
 
   test('CTC drops blanks and repeated classes', () {
     expect(ctcDecode(const [0, 1, 1, 0, 2], const ['身', '份']), '身份');
-    expect(
-      ctcArgmax(const [0.1, 0.9, 0.8, 0.2], 2),
-      [1, 0],
-    );
+    expect(ctcArgmax(const [0.1, 0.9, 0.8, 0.2], 2), [1, 0]);
   });
 
   test('a bright blob on the detection map becomes a box', () {
@@ -55,9 +52,26 @@ void main() {
     expect(modelFileById('qwen-vl').fileName, contains('Q4_K_M'));
     expect(modelFileById('qwen-mmproj').fileName, contains('mmproj'));
     expect(
-      modelCatalog.every((file) => file.license == 'Apache-2.0'),
+      modelFileById('yunet').fileName,
+      'face_detection_yunet_2023mar.onnx',
+    );
+    expect(modelFileById('yunet').license, 'MIT');
+    expect(modelFileById('adaface').fileName, 'adaface_ir_18.onnx');
+    expect(modelFileById('adaface').license, 'MIT');
+    expect(modelFileById('paddleocr-vl').fileName, contains('Q4_K_M'));
+    expect(modelFileById('paddleocr-vl').license, 'Apache-2.0');
+    expect(
+      modelFileById('paddleocr-mmproj').fileName,
+      contains('mmproj-paddleocr'),
+    );
+    expect(
+      modelCatalog.every(
+        (file) => file.license == 'Apache-2.0' || file.license == 'MIT',
+      ),
       isTrue,
     );
+    expect(modelCatalog.where((file) => file.requiredForSearch), hasLength(4));
+    expect(modelFileById('yunet').requiredForSearch, isFalse);
   });
 
   test('a model label keeps the first short line', () {

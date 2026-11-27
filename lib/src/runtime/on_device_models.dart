@@ -58,22 +58,30 @@ class QwenVlNamer {
     ).fromFile(ggufPath).install();
   }
 
-  Future<String> label(Uint8List png) async {
+  Future<String> label(Uint8List png) {
+    return ask(
+      png,
+      prompt: '用不超过8个汉字给这张照片起一个短标题，例如“身份证”或“周末爬山”。只输出标题。',
+      maxOutputTokens: 32,
+    ).then(cleanLabel);
+  }
+
+  /// One image question. The model is closed before this method returns.
+  Future<String> ask(
+    Uint8List png, {
+    required String prompt,
+    int maxOutputTokens = 512,
+  }) async {
     final model = await FlutterEdgeAi.getActiveModel(
       maxTokens: 2048,
       supportImage: true,
       preferredBackend: PreferredBackend.cpu,
     );
     try {
-      final chat = await model.openChat(maxOutputTokens: 32);
+      final chat = await model.openChat(maxOutputTokens: maxOutputTokens);
       try {
         await chat.addQuery(
-          Message.withImage(
-            text:
-                '用不超过8个汉字给这张照片起一个短标题，例如“身份证”或“周末爬山”。只输出标题。',
-            isUser: true,
-            imageBytes: png,
-          ),
+          Message.withImage(text: prompt, isUser: true, imageBytes: png),
         );
         final buffer = StringBuffer();
         await for (final response in chat.generateChatResponseAsync()) {
@@ -81,7 +89,7 @@ class QwenVlNamer {
             buffer.write(response.token);
           }
         }
-        return cleanLabel(buffer.toString());
+        return buffer.toString().trim();
       } finally {
         await chat.close();
       }

@@ -1,4 +1,4 @@
-/// Runtimes this build actually links, plus the face stack left for later.
+/// Runtimes this build links. Face and document weights stay optional downloads.
 class EnginePlan {
   const EnginePlan({
     required this.runtime,
@@ -14,7 +14,7 @@ class EnginePlan {
 const List<EnginePlan> plannedEngines = <EnginePlan>[
   EnginePlan(
     runtime: 'ONNX Runtime',
-    role: 'PP-OCRv6 medium OCR on CPU',
+    role: 'PP-OCRv6 medium, YuNet, and AdaFace on CPU',
     linked: true,
   ),
   EnginePlan(
@@ -24,13 +24,9 @@ const List<EnginePlan> plannedEngines = <EnginePlan>[
   ),
   EnginePlan(
     runtime: 'llama.cpp',
-    role: 'Qwen3-VL-2B-Instruct labels, unloaded after each photo',
+    role:
+        'Qwen3-VL labels and PaddleOCR-VL document fields, one model at a time',
     linked: true,
-  ),
-  EnginePlan(
-    runtime: 'MediaPipe or YuNet + AdaFace',
-    role: 'Face clustering, not linked yet',
-    linked: false,
   ),
 ];
 

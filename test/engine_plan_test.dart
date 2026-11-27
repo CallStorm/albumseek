@@ -5,14 +5,20 @@ import 'package:albumseek/src/engine/local_index.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('linked runtimes and the deferred face index stay named', () {
+  test('linked runtimes include faces and document reading', () {
     expect(
-      plannedEngines.where((engine) => engine.linked).map((engine) => engine.runtime),
+      plannedEngines
+          .where((engine) => engine.linked)
+          .map((engine) => engine.runtime),
       ['ONNX Runtime', 'LiteRT', 'llama.cpp'],
     );
     expect(
-      plannedEngines.singleWhere((engine) => !engine.linked).runtime,
+      plannedEngines.map((engine) => engine.role).join(' '),
       contains('AdaFace'),
+    );
+    expect(
+      plannedEngines.map((engine) => engine.role).join(' '),
+      contains('PaddleOCR-VL'),
     );
     expect(plannedIndex, contains('sqlite-vec'));
     expect(plannedIndex, contains('FTS5'));

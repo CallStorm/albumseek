@@ -74,13 +74,41 @@ class SqlitePhotoIndex implements LocalIndex {
         embedding float[$dimension] distance_metric=cosine
       )
     ''');
+    _db.execute('''
+      CREATE TABLE IF NOT EXISTS faces (
+        id INTEGER PRIMARY KEY,
+        photo_id TEXT NOT NULL,
+        x REAL NOT NULL,
+        y REAL NOT NULL,
+        w REAL NOT NULL,
+        h REAL NOT NULL,
+        embedding TEXT NOT NULL,
+        person_id INTEGER NOT NULL
+      )
+    ''');
+    _db.execute('''
+      CREATE TABLE IF NOT EXISTS documents (
+        photo_id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        fields_json TEXT NOT NULL
+      )
+    ''');
+    _try('ALTER TABLE photos ADD COLUMN faces_done INTEGER NOT NULL DEFAULT 0');
+    _try('ALTER TABLE photos ADD COLUMN doc_done INTEGER NOT NULL DEFAULT 0');
+  }
+
+  void _try(String sql) {
+    try {
+      _db.execute(sql);
+    } catch (_) {
+      // The column already exists on databases created with this schema.
+    }
   }
 
   int? idFor(String photoId) {
-    final rows = _db.select(
-      'SELECT id FROM photos WHERE photo_id = ?',
-      [photoId],
-    );
+    final rows = _db.select('SELECT id FROM photos WHERE photo_id = ?', [
+      photoId,
+    ]);
     if (rows.isEmpty) {
       return null;
     }
@@ -115,10 +143,9 @@ class SqlitePhotoIndex implements LocalIndex {
   }
 
   String? labelFor(String photoId) {
-    final rows = _db.select(
-      'SELECT label FROM photos WHERE photo_id = ?',
-      [photoId],
-    );
+    final rows = _db.select('SELECT label FROM photos WHERE photo_id = ?', [
+      photoId,
+    ]);
     if (rows.isEmpty) {
       return null;
     }
@@ -126,10 +153,9 @@ class SqlitePhotoIndex implements LocalIndex {
   }
 
   String? textFor(String photoId) {
-    final rows = _db.select(
-      'SELECT ocr_text FROM photos WHERE photo_id = ?',
-      [photoId],
-    );
+    final rows = _db.select('SELECT ocr_text FROM photos WHERE photo_id = ?', [
+      photoId,
+    ]);
     if (rows.isEmpty) {
       return null;
     }
@@ -141,8 +167,7 @@ class SqlitePhotoIndex implements LocalIndex {
       "SELECT photo_id, label FROM photos WHERE label IS NOT NULL AND label != ''",
     );
     return {
-      for (final row in rows)
-        row['photo_id'] as String: row['label'] as String,
+      for (final row in rows) row['photo_id'] as String: row['label'] as String,
     };
   }
 
@@ -177,10 +202,10 @@ class SqlitePhotoIndex implements LocalIndex {
 
   void markOcrFailed(String photoId, String message) {
     final id = ensureRow(photoId);
-    _db.execute(
-      'UPDATE photos SET ocr_done = 1, error = ? WHERE id = ?',
-      [message, id],
-    );
+    _db.execute('UPDATE photos SET ocr_done = 1, error = ? WHERE id = ?', [
+      message,
+      id,
+    ]);
   }
 
   @override
@@ -204,10 +229,10 @@ class SqlitePhotoIndex implements LocalIndex {
 
   void markEmbedFailed(String photoId, String message) {
     final id = ensureRow(photoId);
-    _db.execute(
-      'UPDATE photos SET embedded = 1, error = ? WHERE id = ?',
-      [message, id],
-    );
+    _db.execute('UPDATE photos SET embedded = 1, error = ? WHERE id = ?', [
+      message,
+      id,
+    ]);
   }
 
   void saveLabel(String photoId, String label) {
@@ -220,10 +245,10 @@ class SqlitePhotoIndex implements LocalIndex {
 
   void markNameFailed(String photoId, String message) {
     final id = ensureRow(photoId);
-    _db.execute(
-      'UPDATE photos SET named = 1, error = ? WHERE id = ?',
-      [message, id],
-    );
+    _db.execute('UPDATE photos SET named = 1, error = ? WHERE id = ?', [
+      message,
+      id,
+    ]);
   }
 
   @override
@@ -289,6 +314,142 @@ class SqlitePhotoIndex implements LocalIndex {
       return null;
     }
     return [for (final value in decoded) (value as num).toDouble()];
+  }
+
+  bool facesDone(String photoId) {
+    final rows = _db.select(
+      'SELECT faces_done FROM photos WHERE photo_id = ?',
+      [photoId],
+    );
+    if (rows.isEmpty) {
+      return false;
+    }
+    return (rows.first['faces_done'] as int? ?? 0) == 1;
+  }
+
+  bool docDone(String photoId) {
+    final rows = _db.select('SELECT doc_done FROM photos WHERE photo_id = ?', [
+      photoId,
+    ]);
+    if (rows.isEmpty) {
+      return false;
+    }
+    return (rows.first['doc_done'] as int? ?? 0) == 1;
+  }
+
+  Set<String> completedFaces() => _ids('faces_done = 1');
+
+  Set<String> completedDocs() => _ids('doc_done = 1');
+
+  void insertFace({
+    required String photoId,
+    required double x,
+    required double y,
+    required double width,
+    required double height,
+    required List<double> embedding,
+    required int personId,
+  }) {
+    ensureRow(photoId);
+    _db.execute(
+      '''
+      INSERT INTO faces(photo_id, x, y, w, h, embedding, person_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ''',
+      [photoId, x, y, width, height, jsonEncode(embedding), personId],
+    );
+  }
+
+  void markFacesDone(String photoId) {
+    ensureRow(photoId);
+    _db.execute('UPDATE photos SET faces_done = 1 WHERE photo_id = ?', [
+      photoId,
+    ]);
+  }
+
+  void markDocDone(String photoId) {
+    ensureRow(photoId);
+    _db.execute('UPDATE photos SET doc_done = 1 WHERE photo_id = ?', [photoId]);
+  }
+
+  List<({int personId, List<double> embedding})> faceSamples() {
+    final rows = _db.select('SELECT person_id, embedding FROM faces');
+    final samples = <({int personId, List<double> embedding})>[];
+    for (final row in rows) {
+      final decoded = jsonDecode(row['embedding'] as String);
+      if (decoded is! List) {
+        continue;
+      }
+      samples.add((
+        personId: row['person_id'] as int,
+        embedding: [for (final value in decoded) (value as num).toDouble()],
+      ));
+    }
+    return samples;
+  }
+
+  List<({int personId, String photoId, int count})> peopleRows() {
+    final rows = _db.select('''
+      SELECT person_id, photo_id, COUNT(*) AS n
+      FROM faces
+      GROUP BY person_id, photo_id
+      ORDER BY person_id, photo_id
+    ''');
+    return [
+      for (final row in rows)
+        (
+          personId: row['person_id'] as int,
+          photoId: row['photo_id'] as String,
+          count: row['n'] as int,
+        ),
+    ];
+  }
+
+  List<List<String>> peopleClusters() {
+    final grouped = <int, List<String>>{};
+    for (final row in peopleRows()) {
+      grouped.putIfAbsent(row.personId, () => <String>[]).add(row.photoId);
+    }
+    return grouped.values.toList();
+  }
+
+  void saveDocument({
+    required String photoId,
+    required String kind,
+    required String fieldsJson,
+    required String ftsBody,
+  }) {
+    final id = ensureRow(photoId);
+    _db.execute(
+      '''
+      INSERT INTO documents(photo_id, kind, fields_json)
+      VALUES (?, ?, ?)
+      ON CONFLICT(photo_id) DO UPDATE SET
+        kind = excluded.kind,
+        fields_json = excluded.fields_json
+      ''',
+      [photoId, kind, fieldsJson],
+    );
+    _db.execute('DELETE FROM photo_fts WHERE rowid = ?', [id]);
+    _db.execute(
+      'INSERT INTO photo_fts(rowid, photo_id, body) VALUES (?, ?, ?)',
+      [id, photoId, ftsBody],
+    );
+    _db.execute('UPDATE photos SET doc_done = 1 WHERE photo_id = ?', [photoId]);
+  }
+
+  ({String kind, String fieldsJson})? documentFor(String photoId) {
+    final rows = _db.select(
+      'SELECT kind, fields_json FROM documents WHERE photo_id = ?',
+      [photoId],
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    return (
+      kind: rows.first['kind'] as String,
+      fieldsJson: rows.first['fields_json'] as String,
+    );
   }
 
   @override

@@ -100,9 +100,7 @@ class _LibraryBody extends StatelessWidget {
             color: theme.colorScheme.secondaryContainer,
             child: const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Text(
-                'Showing photos chosen with the system picker.',
-              ),
+              child: Text('Showing photos chosen with the system picker.'),
             ),
           ),
         if (controller.indexing)
@@ -144,6 +142,8 @@ class _IndexBanner extends StatelessWidget {
         final stage = switch (index.stage) {
           IndexStage.readingText => 'reading text',
           IndexStage.embedding => 'embedding',
+          IndexStage.faces => 'finding faces',
+          IndexStage.documents => 'reading documents',
           IndexStage.naming => 'naming',
           IndexStage.idle => 'idle',
         };

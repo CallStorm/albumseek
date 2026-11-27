@@ -27,7 +27,7 @@ class _ShellPageState extends State<ShellPage> {
         children: [
           LibraryPage(controller: widget.controller, index: widget.index),
           SearchPage(controller: widget.controller, index: widget.index),
-          CollectionsPage(controller: widget.controller),
+          CollectionsPage(controller: widget.controller, index: widget.index),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -39,10 +39,7 @@ class _ShellPageState extends State<ShellPage> {
             selectedIcon: Icon(Icons.grid_view),
             label: 'Library',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.search),
-            label: 'Search',
-          ),
+          NavigationDestination(icon: Icon(Icons.search), label: 'Search'),
           NavigationDestination(
             icon: Icon(Icons.photo_album_outlined),
             selectedIcon: Icon(Icons.photo_album),

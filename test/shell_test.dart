@@ -13,7 +13,10 @@ void main() {
     await tester.pumpWidget(AlbumseekApp(library: library));
     await _until(tester, find.text('Allow photo access'));
 
-    expect(find.text('Photos stay on this phone').hitTestable(), findsOneWidget);
+    expect(
+      find.text('Photos stay on this phone').hitTestable(),
+      findsOneWidget,
+    );
     expect(find.text('Choose photos').hitTestable(), findsOneWidget);
 
     await tester.tap(find.text('Search'));
@@ -25,11 +28,7 @@ void main() {
       AlbumSummary(id: 'camera', name: 'Camera', count: 2),
     ];
     library.stored = [
-      PhotoRecord(
-        id: 'img',
-        title: 'IMG_1.jpg',
-        createdAt: DateTime.now(),
-      ),
+      PhotoRecord(id: 'img', title: 'IMG_1.jpg', createdAt: DateTime.now()),
       PhotoRecord(
         id: 'shot',
         title: 'Screenshot.png',
@@ -40,16 +39,28 @@ void main() {
     await tester.tap(find.text('Library'));
     await tester.pump();
     await tester.tap(find.text('Allow photo access').hitTestable());
-    await _until(tester, find.byKey(const ValueKey<String>('img')).hitTestable());
-    expect(find.byKey(const ValueKey<String>('shot')).hitTestable(), findsOneWidget);
+    await _until(
+      tester,
+      find.byKey(const ValueKey<String>('img')).hitTestable(),
+    );
+    expect(
+      find.byKey(const ValueKey<String>('shot')).hitTestable(),
+      findsOneWidget,
+    );
 
     await tester.tap(find.text('Search'));
     await tester.pump();
     await tester.enterText(find.byType(TextField), 'img');
     await tester.pump();
 
-    expect(find.byKey(const ValueKey<String>('img')).hitTestable(), findsOneWidget);
-    expect(find.byKey(const ValueKey<String>('shot')).hitTestable(), findsNothing);
+    expect(
+      find.byKey(const ValueKey<String>('img')).hitTestable(),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('shot')).hitTestable(),
+      findsNothing,
+    );
     expect(
       find.text('Matches file names and dates on this phone.'),
       findsOneWidget,
@@ -57,22 +68,33 @@ void main() {
 
     await tester.tap(find.text('Today'));
     await tester.pump();
-    expect(find.byKey(const ValueKey<String>('img')).hitTestable(), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('img')).hitTestable(),
+      findsOneWidget,
+    );
 
     await tester.tap(find.text('Collections'));
     await tester.pump();
     expect(
-      find.text('Face grouping will run on this phone in a later build.'),
+      find.text('Download YuNet and AdaFace, then index, to group faces.'),
       findsOneWidget,
     );
     expect(find.text('Camera'), findsOneWidget);
 
     await tester.tap(find.text('Camera'));
-    await _until(tester, find.byKey(const ValueKey<String>('shot')).hitTestable());
-    expect(find.byKey(const ValueKey<String>('img')).hitTestable(), findsOneWidget);
+    await _until(
+      tester,
+      find.byKey(const ValueKey<String>('shot')).hitTestable(),
+    );
+    expect(
+      find.byKey(const ValueKey<String>('img')).hitTestable(),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('opening settings is offered after access is denied', (tester) async {
+  testWidgets('opening settings is offered after access is denied', (
+    tester,
+  ) async {
     final library = FakePhotoLibrary();
     await tester.pumpWidget(AlbumseekApp(library: library));
     await _until(tester, find.text('Allow photo access'));

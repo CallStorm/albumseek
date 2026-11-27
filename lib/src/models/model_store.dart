@@ -36,7 +36,15 @@ class ModelStore {
       modelCatalog.where((file) => file.requiredForSearch).every(isReady);
 
   bool get namingModelsReady =>
-      isReady(modelFileById('qwen-vl')) && isReady(modelFileById('qwen-mmproj'));
+      isReady(modelFileById('qwen-vl')) &&
+      isReady(modelFileById('qwen-mmproj'));
+
+  bool get faceModelsReady =>
+      isReady(modelFileById('yunet')) && isReady(modelFileById('adaface'));
+
+  bool get documentModelsReady =>
+      isReady(modelFileById('paddleocr-vl')) &&
+      isReady(modelFileById('paddleocr-mmproj'));
 
   Future<void> download(
     ModelFile spec, {
@@ -100,7 +108,8 @@ class ModelStore {
         );
       }
       await sink.close();
-      if (response.contentLength != null && received != response.contentLength) {
+      if (response.contentLength != null &&
+          received != response.contentLength) {
         throw ModelStoreException('${spec.fileName} download ended early.');
       }
       await _finish(spec, partial, target);

@@ -1,14 +1,19 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_edge_ai/flutter_edge_ai.dart' hide ModelFile;
 import 'package:flutter_edge_ai_llama/flutter_edge_ai_llama.dart';
 import 'package:flutter_edge_ai_litertlm/flutter_edge_ai_litertlm.dart';
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../data/photo_library.dart';
+import '../docs/document_fields.dart';
+import '../engine/face_index.dart';
+import '../faces/face_pipeline.dart';
 import '../index/cjk_tokenizer.dart';
 import '../index/photo_database.dart';
 import '../index/rrf.dart';
@@ -18,9 +23,23 @@ import '../models/model_store.dart';
 import '../ocr/ppocr_v6.dart';
 import 'on_device_models.dart';
 
-enum IndexStage { idle, readingText, embedding, naming }
+enum IndexStage { idle, readingText, embedding, faces, documents, naming }
+
+/// The llama.cpp projector for whichever vision model is about to load.
+class ProjectorSlot {
+  String? path;
+}
 
 /// A ranked photo from keyword search, visual search, or both.
+class PersonSummary {
+  const PersonSummary({required this.id, required this.photoIds});
+
+  final int id;
+  final List<String> photoIds;
+
+  String get title => '人物 $id';
+}
+
 class SearchHit {
   const SearchHit({
     required this.photoId,
@@ -45,10 +64,16 @@ class AlbumIndex extends ChangeNotifier {
     PpOcrV6? ocr,
     GemmaEmbedder? embedder,
     QwenVlNamer? namer,
+    FacePipeline? faces,
+    SqliteFaceIndex? faceIndex,
+    ProjectorSlot? projector,
     this.startupError,
   }) : _ocr = ocr ?? PpOcrV6(),
        _embedder = embedder ?? GemmaEmbedder(),
-       _namer = namer ?? QwenVlNamer();
+       _namer = namer ?? QwenVlNamer(),
+       _faces = faces ?? FacePipeline(),
+       _faceIndex = faceIndex ?? SqliteFaceIndex(_index),
+       _projector = projector ?? ProjectorSlot();
 
   final PhotoLibrary library;
   final ModelStore store;
@@ -57,6 +82,9 @@ class AlbumIndex extends ChangeNotifier {
   final PpOcrV6 _ocr;
   final GemmaEmbedder _embedder;
   final QwenVlNamer _namer;
+  final FacePipeline _faces;
+  final SqliteFaceIndex _faceIndex;
+  final ProjectorSlot _projector;
 
   List<PhotoRecord> _photos = const [];
   Future<void> _chain = Future<void>.value();
@@ -77,6 +105,8 @@ class AlbumIndex extends ChangeNotifier {
   bool get paused => _paused;
   bool get searchModelsReady => store.searchModelsReady;
   bool get namingModelsReady => store.namingModelsReady;
+  bool get faceModelsReady => store.faceModelsReady;
+  bool get documentModelsReady => store.documentModelsReady;
   bool get hasIndexedPhotos => _index.searchableCount > 0;
 
   static Future<AlbumIndex?> open(PhotoLibrary library) async {
@@ -86,6 +116,7 @@ class AlbumIndex extends ChangeNotifier {
       await models.create(recursive: true);
       final store = ModelStore(models);
       String? startupError;
+      final projector = ProjectorSlot();
       SqlitePhotoIndex? index;
       try {
         index = SqlitePhotoIndex.openFile(p.join(support.path, 'albumseek.db'));
@@ -101,13 +132,7 @@ class AlbumIndex extends ChangeNotifier {
           embeddingBackends: const [LiteRtEmbeddingBackend()],
           inferenceEngines: [
             LlamaEngineProvider(
-              projectorResolver: (spec, config) async {
-                final projector = store.fileFor(modelFileById('qwen-mmproj'));
-                if (store.isReady(modelFileById('qwen-mmproj'))) {
-                  return projector.path;
-                }
-                return null;
-              },
+              projectorResolver: (spec, config) async => projector.path,
             ),
           ],
         );
@@ -119,8 +144,10 @@ class AlbumIndex extends ChangeNotifier {
         library: library,
         store: store,
         index: index,
+        projector: projector,
         startupError: startupError,
       );
+      await album._faceIndex.open();
       album.labels = index.labelsById();
       return album;
     } catch (error) {
@@ -262,10 +289,17 @@ class AlbumIndex extends ChangeNotifier {
         await _locked(() => _embed(embedPhoto));
         continue;
       }
-      final namePhoto = _next(
-        _index.completedNames(),
-        store.namingModelsReady,
-      );
+      final facePhoto = _next(_index.completedFaces(), store.faceModelsReady);
+      if (facePhoto != null) {
+        await _locked(() => _detectFaces(facePhoto));
+        continue;
+      }
+      final docPhoto = _nextDocument();
+      if (docPhoto != null) {
+        await _locked(() => _readDocument(docPhoto));
+        continue;
+      }
+      final namePhoto = _next(_index.completedNames(), store.namingModelsReady);
       if (namePhoto != null) {
         await _locked(() => _name(namePhoto));
         continue;
@@ -336,12 +370,161 @@ class AlbumIndex extends ChangeNotifier {
     await Future<void>.delayed(Duration.zero);
   }
 
+  Future<void> _detectFaces(PhotoRecord photo) async {
+    stage = IndexStage.faces;
+    notifyListeners();
+    try {
+      if (_index.facesDone(photo.id)) {
+        return;
+      }
+      await _releaseHeavyModels();
+      final bytes = await library.imageBytes(photo, maxSide: 1280);
+      if (bytes == null) {
+        _index.markFacesDone(photo.id);
+        return;
+      }
+      await _faces.openDetector(store.fileFor(modelFileById('yunet')).path);
+      final found = await _faces.detect(bytes);
+      await _faces.closeDetector();
+      final decoded = img.decodeImage(bytes);
+      final source = decoded == null ? null : img.bakeOrientation(decoded);
+      final embedded = <LocatedFace>[];
+      if (source != null && found.isNotEmpty) {
+        await _faces.openEmbedder(store.fileFor(modelFileById('adaface')).path);
+        for (final face in found) {
+          final vector = await _faces.embed(source, face);
+          embedded.add(face.withEmbedding(vector));
+        }
+        await _faces.closeEmbedder();
+      }
+      await _faceIndex.addPhoto(photo.id, embedded);
+    } catch (error) {
+      debugPrint('Albumseek faces failed for ${photo.id}: $error');
+      await _faces.close();
+      _index.markFacesDone(photo.id);
+    }
+    notifyListeners();
+  }
+
+  PhotoRecord? _nextDocument() {
+    if (!store.isReady(modelFileById('ocr-rec')) &&
+        !store.documentModelsReady) {
+      return null;
+    }
+    final done = _index.completedDocs();
+    final readable = _index.completedOcr();
+    for (final photo in _photos) {
+      if (!done.contains(photo.id) && readable.contains(photo.id)) {
+        return photo;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _readDocument(PhotoRecord photo) async {
+    stage = IndexStage.documents;
+    notifyListeners();
+    try {
+      final ocr = _index.textFor(photo.id) ?? '';
+      var parsed = parseChineseDocument(ocr);
+      final worthVision =
+          parsed != null ||
+          ocr.contains('证') ||
+          ocr.contains('户') ||
+          ocr.contains('表');
+      if (worthVision && store.documentModelsReady) {
+        await _releaseHeavyModels();
+        final bytes = await library.imageBytes(photo, maxSide: 1280);
+        if (bytes != null) {
+          _projector.path = store
+              .fileFor(modelFileById('paddleocr-mmproj'))
+              .path;
+          await _namer.install(
+            store.fileFor(modelFileById('paddleocr-vl')).path,
+          );
+          final text = await _namer.ask(
+            await uprightPng(bytes, maxSide: 1280),
+            prompt: 'OCR:',
+            maxOutputTokens: 512,
+          );
+          parsed =
+              parseChineseDocument(text) ??
+              parsed ??
+              (text.trim().length >= 12
+                  ? ParsedDocument(kind: 'form', fields: {'识别文本': text.trim()})
+                  : null);
+        }
+      }
+      if (parsed == null) {
+        _index.markDocDone(photo.id);
+        return;
+      }
+      _index.saveDocument(
+        photoId: photo.id,
+        kind: parsed.kind,
+        fieldsJson: jsonEncode(parsed.fields),
+        ftsBody: cjkIndexText('$ocr\n${parsed.searchableText}'),
+      );
+    } catch (error) {
+      debugPrint('Albumseek document read failed for ${photo.id}: $error');
+      final fallback = parseChineseDocument(_index.textFor(photo.id) ?? '');
+      if (fallback != null) {
+        _index.saveDocument(
+          photoId: photo.id,
+          kind: fallback.kind,
+          fieldsJson: jsonEncode(fallback.fields),
+          ftsBody: cjkIndexText(
+            '${_index.textFor(photo.id) ?? ''}\n${fallback.searchableText}',
+          ),
+        );
+      } else {
+        _index.markDocDone(photo.id);
+      }
+    }
+    notifyListeners();
+  }
+
+  Future<void> _releaseHeavyModels() async {
+    await _ocr.close();
+    await _embedder.close();
+    await _faces.close();
+  }
+
+  List<PersonSummary> people() {
+    final grouped = <int, List<String>>{};
+    for (final row in _index.peopleRows()) {
+      grouped.putIfAbsent(row.personId, () => <String>[]).add(row.photoId);
+    }
+    final people = [
+      for (final entry in grouped.entries)
+        PersonSummary(id: entry.key, photoIds: entry.value),
+    ];
+    people.sort((a, b) => b.photoIds.length.compareTo(a.photoIds.length));
+    return people;
+  }
+
+  Map<String, String>? documentFields(String photoId) {
+    final row = _index.documentFor(photoId);
+    if (row == null) {
+      return null;
+    }
+    final decoded = jsonDecode(row.fieldsJson);
+    if (decoded is! Map) {
+      return null;
+    }
+    return {
+      for (final entry in decoded.entries) '${entry.key}': '${entry.value}',
+    };
+  }
+
+  String? documentKind(String photoId) => _index.documentFor(photoId)?.kind;
+
   Future<void> _name(PhotoRecord photo) async {
     stage = IndexStage.naming;
     notifyListeners();
     try {
-      await _ocr.close();
-      await _embedder.close();
+      await _releaseHeavyModels();
+      _projector.path = store.fileFor(modelFileById('qwen-mmproj')).path;
       final bytes = await library.imageBytes(photo, maxSide: 768);
       if (bytes == null) {
         _index.markNameFailed(photo.id, 'No image bytes.');
@@ -368,9 +551,8 @@ class AlbumIndex extends ChangeNotifier {
     if (_ocr.isOpen) {
       return;
     }
-    final dict = await File(
-      store.fileFor(modelFileById('ocr-dict')).path,
-    ).readAsString();
+    final dict = await File(store.fileFor(modelFileById('ocr-dict')).path)
+        .readAsString();
     await _ocr.open(
       detectionPath: store.fileFor(modelFileById('ocr-det')).path,
       recognitionPath: store.fileFor(modelFileById('ocr-rec')).path,
@@ -383,7 +565,9 @@ class AlbumIndex extends ChangeNotifier {
     final embedded = _index.completedEmbed();
     total = _photos.length;
     done = _photos
-        .where((photo) => ocrDone.contains(photo.id) && embedded.contains(photo.id))
+        .where(
+          (photo) => ocrDone.contains(photo.id) && embedded.contains(photo.id),
+        )
         .length;
   }
 
@@ -399,6 +583,8 @@ class AlbumIndex extends ChangeNotifier {
     _paused = true;
     unawaited(_ocr.close());
     unawaited(_embedder.close());
+    unawaited(_faces.close());
+    unawaited(_faceIndex.close());
     unawaited(_index.close());
     super.dispose();
   }

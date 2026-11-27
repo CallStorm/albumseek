@@ -47,6 +47,16 @@ class PhotoViewerPage extends StatelessWidget {
                 label,
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
+            if (index?.documentFields(photo.id) case final fields?)
+              Text(
+                fields.entries
+                    .take(4)
+                    .map((entry) => '${entry.key} ${entry.value}')
+                    .join(' · '),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
           ],
         ),
       ),
